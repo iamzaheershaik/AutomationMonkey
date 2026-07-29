@@ -129,8 +129,12 @@
 **/.pub-cache/
 **/.pub/
 
-# Flutter
-**/flutter_export_environment.sh
+# Project-specific
+data/
+*.coverage
+coverage.xml
+.pytest_cache/
+.ruff_cache/
 **/flutter_export_environment.bat
 **/.flutter-plugins
 **/.flutter-plugins-dependencies
