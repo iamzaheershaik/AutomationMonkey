@@ -1,0 +1,75 @@
+version: "3.9"
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=sqlite:///./data/self_improving_ai.db
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - REQUIRE_HUMAN_APPROVAL=true
+      - AUTO_DEPLOY_ENABLED=false
+    volumes:
+      - ai_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  orchestrator:
+    build: .
+    command: ["--loop"]
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=sqlite:///./data/self_improving_ai.db
+      - REQUIRE_HUMAN_APPROVAL=true
+    volumes:
+      - ai_data:/app/data
+    restart: unless-stopped
+    depends_on:
+      - api
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./observability/grafana/datasources:/etc/grafana/provisioning/datasources
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+volumes:
+  ai_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:

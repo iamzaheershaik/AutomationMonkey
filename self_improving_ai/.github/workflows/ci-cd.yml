@@ -1,0 +1,156 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  # ------------------------------------------------------------------
+  # Lint & Type Check
+  # ------------------------------------------------------------------
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install .[dev]
+
+      - name: Run Ruff linter
+        run: ruff check .
+
+      - name: Run Mypy type checker
+        run: mypy self_improving_ai/ --ignore-missing-imports || true
+
+  # ------------------------------------------------------------------
+  # Unit Tests
+  # ------------------------------------------------------------------
+  test:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install .[dev]
+
+      - name: Run tests with coverage
+        run: |
+          pytest tests/ -v --cov=self_improving_ai --cov-report=xml --cov-report=term-missing -n auto
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        if: matrix.python-version == '3.11'
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
+  # ------------------------------------------------------------------
+  # Security Scan
+  # ------------------------------------------------------------------
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Bandit security scanner
+        uses: PyCQA/bandit-action@v1
+        with:
+          path: self_improving_ai/
+
+  # ------------------------------------------------------------------
+  # Stress Test
+  # ------------------------------------------------------------------
+  stress:
+    name: Stress Test
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install .[dev] locust
+
+      - name: Start API in background
+        run: |
+          python -m uvicorn api:app --host 0.0.0.0 --port 8000 &
+          sleep 5
+          curl -f http://localhost:8000/health
+
+      - name: Run Locust stress test
+        run: |
+          locust -f tests/stress/locustfile.py --headless \
+            --users 50 --spawn-rate 5 --run-time 30s \
+            --host http://localhost:8000
+        continue-on-error: true
+
+  # ------------------------------------------------------------------
+  # Build & Push Docker
+  # ------------------------------------------------------------------
+  docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: [lint, test, security]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: self-improving-ai:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ------------------------------------------------------------------
+  # Deploy (Canary)
+  # ------------------------------------------------------------------
+  deploy-canary:
+    name: Canary Deploy
+    runs-on: ubuntu-latest
+    needs: [docker]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: canary
+      url: https://canary.self-improving-ai.example.com
+    steps:
+      - name: Deploy to canary
+        run: |
+          echo "Deploying canary release..."
+          # In production: kubectl, helm, or cloud deploy commands
+          # This is a placeholder for your actual deployment mechanism
+          echo "Canary deployed to 10% of traffic"
